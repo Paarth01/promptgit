@@ -1,12 +1,12 @@
 """Phase 1: prompt registry — versioning, rollback, diff."""
+
 import difflib
 import re
 from uuid import UUID
 
+from app.db_models import Prompt, PromptAuditLog, PromptVersion
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
-from app.db_models import Prompt, PromptAuditLog, PromptVersion
 
 
 class PromptNotFound(Exception):
@@ -19,6 +19,7 @@ class VersionNotFound(Exception):
 
 class SchemaDriftError(Exception):
     """Raised when prompt_text's {vars} don't match declared template_variables."""
+
     pass
 
 
@@ -87,14 +88,16 @@ def create_version(
     db.add(version)
     db.flush()  # get version.id without committing yet
 
-    db.add(PromptAuditLog(
-        prompt_id=prompt.id,
-        action="create_version",
-        from_version_id=prompt.active_version_id,
-        to_version_id=version.id,
-        actor=created_by,
-        reason=commit_message,
-    ))
+    db.add(
+        PromptAuditLog(
+            prompt_id=prompt.id,
+            action="create_version",
+            from_version_id=prompt.active_version_id,
+            to_version_id=version.id,
+            actor=created_by,
+            reason=commit_message,
+        )
+    )
 
     if activate or prompt.active_version_id is None:
         prompt.active_version_id = version.id
@@ -124,19 +127,21 @@ def activate_version(db: Session, slug: str, version_id: UUID, actor: str, reaso
     is_rollback = (
         previous is not None
         and db.query(PromptVersion).filter(PromptVersion.id == previous).first()
-        and version.version_number < db.query(PromptVersion.version_number)
-            .filter(PromptVersion.id == previous).scalar()
+        and version.version_number
+        < db.query(PromptVersion.version_number).filter(PromptVersion.id == previous).scalar()
     )
 
     prompt.active_version_id = version.id
-    db.add(PromptAuditLog(
-        prompt_id=prompt.id,
-        action="rollback" if is_rollback else "activate",
-        from_version_id=previous,
-        to_version_id=version.id,
-        actor=actor,
-        reason=reason,
-    ))
+    db.add(
+        PromptAuditLog(
+            prompt_id=prompt.id,
+            action="rollback" if is_rollback else "activate",
+            from_version_id=previous,
+            to_version_id=version.id,
+            actor=actor,
+            reason=reason,
+        )
+    )
     db.commit()
     db.refresh(prompt)
     return prompt
@@ -158,12 +163,14 @@ def diff_versions(db: Session, slug: str, from_num: int, to_num: int) -> dict:
     v_from = get_version_by_number(db, slug, from_num)
     v_to = get_version_by_number(db, slug, to_num)
 
-    text_diff = list(difflib.unified_diff(
-        v_from.prompt_text.splitlines(keepends=True),
-        v_to.prompt_text.splitlines(keepends=True),
-        fromfile=f"v{v_from.version_number}",
-        tofile=f"v{v_to.version_number}",
-    ))
+    text_diff = list(
+        difflib.unified_diff(
+            v_from.prompt_text.splitlines(keepends=True),
+            v_to.prompt_text.splitlines(keepends=True),
+            fromfile=f"v{v_from.version_number}",
+            tofile=f"v{v_to.version_number}",
+        )
+    )
 
     all_param_keys = set(v_from.params or {}) | set((v_to.params or {}))
     params_diff = {

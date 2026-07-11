@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+exclude = ["dashboard/app.py"]  # streamlit scripts trip a few false-positive unused-import rules
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line length handled by black; ruff's E501 is redundant and noisier
+]
+
+[tool.ruff.lint.per-file-ignores]
+# tests/*.py deliberately sys.path.insert(...) *before* importing the local
+# `app` package (there's no installed package to import otherwise) — ruff's
+# import-sort rule doesn't understand that ordering is load-bearing, not
+# sloppy, so treat it as a false positive here rather than let --fix break it.
+"tests/*.py" = ["I001"]
+
+[tool.black]
+line-length = 110
+target-version = ["py312"]

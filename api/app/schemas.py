@@ -4,8 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ── Prompt Registry ──────────────────────────────────────────────────────
+
 
 class PromptCreate(BaseModel):
     slug: str = Field(..., pattern=r"^[a-z0-9][a-z0-9\-]*[a-z0-9]$")
@@ -82,6 +82,7 @@ class AuditLogEntry(BaseModel):
 
 
 # ── Experiment Engine ────────────────────────────────────────────────────
+
 
 class VariantSpec(BaseModel):
     label: str
@@ -165,6 +166,7 @@ class ServeResponse(BaseModel):
 
 # ── Metrics ───────────────────────────────────────────────────────────────
 
+
 class EventCreate(BaseModel):
     unit_id: str
     variant_id: UUID
@@ -201,3 +203,73 @@ class ExperimentResults(BaseModel):
     winner_variant_id: Optional[UUID]
     winner_ready: bool
     winner_reason: Optional[str]
+    mde_at_current_sample_size: Optional[float] = None
+
+
+class SnapshotOut(BaseModel):
+    variant_id: UUID
+    variant_label: str
+    sample_size: int
+    mean_value: Optional[float]
+    p_value: Optional[float]
+    is_significant: Optional[bool]
+    min_detectable_effect: Optional[float]
+    computed_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────
+
+
+class ApiKeyCreate(BaseModel):
+    name: str
+    role: str = Field(..., pattern="^(viewer|editor|admin)$")
+
+
+class ApiKeyCreated(BaseModel):
+    id: UUID
+    name: str
+    role: str
+    api_key: str  # only ever returned once, at creation time
+
+
+class ApiKeyOut(BaseModel):
+    id: UUID
+    name: str
+    role: str
+    created_by: str
+    created_at: datetime
+    revoked_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class WhoAmI(BaseModel):
+    name: str
+    role: str
+
+
+# ── Custom metric collectors (LLM-judge, task accuracy) ────────────────────
+
+
+class JudgeEventRequest(BaseModel):
+    unit_id: str
+    variant_id: UUID
+    model_output: str
+    rendered_prompt: Optional[str] = None
+    reference_answer: Optional[str] = None
+    collector: str = Field(default="llm_judge", pattern="^(llm_judge|task_accuracy)$")
+    rubric: Optional[str] = None
+    latency_ms: Optional[float] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    cost_usd: Optional[float] = None
+
+
+class JudgeEventResponse(BaseModel):
+    primary_metric_value: float
+    reasoning: Optional[str] = None
+    collector_used: str

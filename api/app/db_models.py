@@ -1,10 +1,20 @@
 """SQLAlchemy ORM models — mirrors migrations/001_init.sql exactly."""
+
 import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer,
-    Numeric, String, Text, UniqueConstraint, ARRAY
+    ARRAY,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import declarative_base, relationship
@@ -26,7 +36,8 @@ class Prompt(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
     versions = relationship(
-        "PromptVersion", back_populates="prompt",
+        "PromptVersion",
+        back_populates="prompt",
         foreign_keys="PromptVersion.prompt_id",
     )
     active_version = relationship("PromptVersion", foreign_keys=[active_version_id], post_update=True)
@@ -52,9 +63,7 @@ class PromptVersion(Base):
 
 class PromptAuditLog(Base):
     __tablename__ = "prompt_audit_log"
-    __table_args__ = (
-        CheckConstraint("action IN ('create_version','activate','rollback')"),
-    )
+    __table_args__ = (CheckConstraint("action IN ('create_version','activate','rollback')"),)
 
     id = uuid_pk()
     prompt_id = Column(UUID(as_uuid=True), ForeignKey("prompts.id", ondelete="CASCADE"), nullable=False)
@@ -70,9 +79,7 @@ class Experiment(Base):
     __tablename__ = "experiments"
     __table_args__ = (
         CheckConstraint("metric_type IN ('binary','continuous')"),
-        CheckConstraint(
-            "status IN ('draft','running','paused','stopped_guardrail','completed')"
-        ),
+        CheckConstraint("status IN ('draft','running','paused','stopped_guardrail','completed')"),
     )
 
     id = uuid_pk()
@@ -91,7 +98,8 @@ class Experiment(Base):
     stopped_at = Column(DateTime(timezone=True))
 
     variants = relationship(
-        "ExperimentVariant", back_populates="experiment",
+        "ExperimentVariant",
+        back_populates="experiment",
         foreign_keys="ExperimentVariant.experiment_id",
     )
 
@@ -104,7 +112,9 @@ class ExperimentVariant(Base):
     )
 
     id = uuid_pk()
-    experiment_id = Column(UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
+    experiment_id = Column(
+        UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False
+    )
     prompt_version_id = Column(UUID(as_uuid=True), ForeignKey("prompt_versions.id"), nullable=False)
     label = Column(String, nullable=False)
     traffic_weight = Column(Numeric, nullable=False)
@@ -118,7 +128,9 @@ class ExperimentAssignment(Base):
     __table_args__ = (UniqueConstraint("experiment_id", "unit_id"),)
 
     id = uuid_pk()
-    experiment_id = Column(UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
+    experiment_id = Column(
+        UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False
+    )
     unit_id = Column(String, nullable=False)
     variant_id = Column(UUID(as_uuid=True), ForeignKey("experiment_variants.id"), nullable=False)
     assigned_at = Column(DateTime(timezone=True), default=datetime.utcnow)
@@ -128,7 +140,9 @@ class ExperimentEvent(Base):
     __tablename__ = "experiment_events"
 
     id = uuid_pk()
-    experiment_id = Column(UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
+    experiment_id = Column(
+        UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False
+    )
     variant_id = Column(UUID(as_uuid=True), ForeignKey("experiment_variants.id"), nullable=False)
     unit_id = Column(String, nullable=False)
     latency_ms = Column(Numeric)
@@ -145,7 +159,9 @@ class ExperimentAnalysisSnapshot(Base):
     __tablename__ = "experiment_analysis_snapshots"
 
     id = uuid_pk()
-    experiment_id = Column(UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
+    experiment_id = Column(
+        UUID(as_uuid=True), ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False
+    )
     variant_id = Column(UUID(as_uuid=True), ForeignKey("experiment_variants.id"), nullable=False)
     sample_size = Column(Integer, nullable=False)
     mean_value = Column(Numeric)
@@ -153,4 +169,18 @@ class ExperimentAnalysisSnapshot(Base):
     p_value = Column(Numeric)
     is_significant = Column(Boolean)
     test_used = Column(String)
+    min_detectable_effect = Column(Numeric)
     computed_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    __table_args__ = (CheckConstraint("role IN ('viewer','editor','admin')"),)
+
+    id = uuid_pk()
+    name = Column(String, nullable=False)
+    key_hash = Column(String, unique=True, nullable=False, index=True)
+    role = Column(String, nullable=False)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)

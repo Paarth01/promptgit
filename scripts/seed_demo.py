@@ -15,11 +15,15 @@ a real LLM-judge call into later — the experiment engine doesn't care where
 the labels come from.
 
 Usage:
-    python scripts/seed_demo.py --api http://localhost:8000
+    python scripts/seed_demo.py --api http://localhost:8000 --api-key pak_...
+
+If the API is running with AUTH_DISABLED=true (local/demo convenience),
+--api-key can be omitted.
 """
+
 import argparse
+import os
 import random
-import time
 
 import requests
 
@@ -32,10 +36,10 @@ CLASSIFIER_PROMPT_TEXT_FEWSHOT = (
     "Classify the following support email into one of these categories: "
     "billing, technical, account, general.\n\n"
     "Examples:\n"
-    "Email: \"I was charged twice this month\" -> billing\n"
-    "Email: \"The app crashes when I upload a file\" -> technical\n"
-    "Email: \"I can't log into my account\" -> account\n"
-    "Email: \"What are your business hours?\" -> general\n\n"
+    'Email: "I was charged twice this month" -> billing\n'
+    'Email: "The app crashes when I upload a file" -> technical\n'
+    'Email: "I can\'t log into my account" -> account\n'
+    'Email: "What are your business hours?" -> general\n\n'
     "Email: {email_body}\n\nCategory:"
 )
 
@@ -63,16 +67,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", default="http://localhost:8000")
     parser.add_argument("--target-sample-size", type=int, default=150)
+    parser.add_argument(
+        "--api-key",
+        default=os.environ.get("PROMPTGIT_API_KEY"),
+        help="Editor-or-higher API key. Not needed if the API is running with AUTH_DISABLED=true.",
+    )
     args = parser.parse_args()
 
     api = args.api
     session = requests.Session()
+    if args.api_key:
+        session.headers.update({"X-API-Key": args.api_key})
 
     print("Creating prompt...")
-    r = session.post(f"{api}/prompts", json={
-        "slug": "support-email-classifier",
-        "description": "Classifies inbound support emails into billing/technical/account/general.",
-    })
+    r = session.post(
+        f"{api}/prompts",
+        json={
+            "slug": "support-email-classifier",
+            "description": "Classifies inbound support emails into billing/technical/account/general.",
+        },
+    )
     if r.status_code == 409:
         print("  prompt already exists, continuing")
     else:
@@ -102,23 +116,38 @@ def main():
         print(f"  created {label} -> version {versions[label]['version_number']}")
 
     print("Creating experiment...")
-    r = session.post(f"{api}/experiments", json={
-        "prompt_slug": "support-email-classifier",
-        "name": "Support classifier: baseline vs few-shot vs CoT",
-        "primary_metric": "task_success",
-        "metric_type": "binary",
-        "target_sample_size": args.target_sample_size,
-        "min_detectable_effect": 0.05,
-        "created_by": "seed-script",
-        "variants": [
-            {"label": "baseline", "prompt_version_id": versions["baseline"]["id"],
-             "traffic_weight": 0.34, "is_baseline": True},
-            {"label": "few_shot", "prompt_version_id": versions["few_shot"]["id"],
-             "traffic_weight": 0.33, "is_baseline": False},
-            {"label": "cot", "prompt_version_id": versions["cot"]["id"],
-             "traffic_weight": 0.33, "is_baseline": False},
-        ],
-    })
+    r = session.post(
+        f"{api}/experiments",
+        json={
+            "prompt_slug": "support-email-classifier",
+            "name": "Support classifier: baseline vs few-shot vs CoT",
+            "primary_metric": "task_success",
+            "metric_type": "binary",
+            "target_sample_size": args.target_sample_size,
+            "min_detectable_effect": 0.05,
+            "created_by": "seed-script",
+            "variants": [
+                {
+                    "label": "baseline",
+                    "prompt_version_id": versions["baseline"]["id"],
+                    "traffic_weight": 0.34,
+                    "is_baseline": True,
+                },
+                {
+                    "label": "few_shot",
+                    "prompt_version_id": versions["few_shot"]["id"],
+                    "traffic_weight": 0.33,
+                    "is_baseline": False,
+                },
+                {
+                    "label": "cot",
+                    "prompt_version_id": versions["cot"]["id"],
+                    "traffic_weight": 0.33,
+                    "is_baseline": False,
+                },
+            ],
+        },
+    )
     r.raise_for_status()
     experiment = r.json()
     print(f"  experiment id: {experiment['id']}")
@@ -133,17 +162,19 @@ def main():
     unit_counter = 0
     for label in ["baseline", "few_shot", "cot"]:
         variant = variant_by_label[label]
-        true_rate = TRUE_SUCCESS_RATES[label]
         for _ in range(N_REQUESTS_PER_VARIANT):
             unit_counter += 1
             unit_id = f"synthetic-user-{unit_counter}"
 
             # Serve through the real /serve endpoint so consistent hashing +
             # assignment persistence gets exercised too, not just direct event writes.
-            serve_resp = session.post(f"{api}/serve/support-email-classifier", json={
-                "unit_id": unit_id,
-                "context": {"email_body": "sample support email content"},
-            })
+            serve_resp = session.post(
+                f"{api}/serve/support-email-classifier",
+                json={
+                    "unit_id": unit_id,
+                    "context": {"email_body": "sample support email content"},
+                },
+            )
             serve_resp.raise_for_status()
             served = serve_resp.json()
             actual_variant_id = served.get("variant_id") or variant["id"]
@@ -154,16 +185,19 @@ def main():
             latency = random.gauss(420 if actual_label == "cot" else 260, 40)
             is_error = random.random() < 0.01  # 1% baseline error rate, well under guardrail
 
-            session.post(f"{api}/events", json={
-                "unit_id": unit_id,
-                "variant_id": actual_variant_id,
-                "latency_ms": max(latency, 50),
-                "input_tokens": random.randint(80, 200),
-                "output_tokens": random.randint(5, 60),
-                "cost_usd": round(random.uniform(0.0004, 0.002), 6),
-                "is_error": is_error,
-                "primary_metric_value": success,
-            }).raise_for_status()
+            session.post(
+                f"{api}/events",
+                json={
+                    "unit_id": unit_id,
+                    "variant_id": actual_variant_id,
+                    "latency_ms": max(latency, 50),
+                    "input_tokens": random.randint(80, 200),
+                    "output_tokens": random.randint(5, 60),
+                    "cost_usd": round(random.uniform(0.0004, 0.002), 6),
+                    "is_error": is_error,
+                    "primary_metric_value": success,
+                },
+            ).raise_for_status()
 
         print(f"  {label}: {N_REQUESTS_PER_VARIANT} events sent")
 

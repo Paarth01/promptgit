@@ -17,20 +17,33 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 st.set_page_config(page_title="Prompt A/B Platform", layout="wide")
 st.title("🧪 Prompt Versioning & A/B Testing Platform")
 
+if "api_key" not in st.session_state:
+    st.session_state.api_key = os.environ.get("API_KEY", "")
+
+with st.sidebar:
+    st.session_state.api_key = st.text_input(
+        "API Key", value=st.session_state.api_key, type="password",
+        help="Generated via scripts/create_api_key.py. Leave blank if the API is running with AUTH_DISABLED=true.",
+    )
+
 page = st.sidebar.radio(
     "Navigate",
     ["Registry", "Experiments", "Compare Versions", "Create Experiment"],
 )
 
 
+def _headers():
+    return {"X-API-Key": st.session_state.api_key} if st.session_state.api_key else {}
+
+
 def api_get(path, **params):
-    r = requests.get(f"{API_BASE_URL}{path}", params=params)
+    r = requests.get(f"{API_BASE_URL}{path}", params=params, headers=_headers())
     r.raise_for_status()
     return r.json()
 
 
 def api_post(path, json=None, **params):
-    r = requests.post(f"{API_BASE_URL}{path}", json=json, params=params)
+    r = requests.post(f"{API_BASE_URL}{path}", json=json, params=params, headers=_headers())
     r.raise_for_status()
     return r.json()
 
@@ -130,6 +143,11 @@ elif page == "Experiments":
 
     st.metric("Status", results["status"])
     st.progress(min(results["progress_pct"] / 100, 1.0), text=f"{results['progress_pct']}% of target sample size")
+    if results.get("mde_at_current_sample_size") is not None:
+        st.caption(
+            f"Minimum detectable effect at current sample size: "
+            f"±{results['mde_at_current_sample_size']:.1%}"
+        )
 
     df = pd.DataFrame(results["variants"])
     if not df.empty:
@@ -145,13 +163,40 @@ elif page == "Experiments":
 
         st.bar_chart(df.set_index("label")["mean_value"])
 
+    st.subheader("Trend over time")
+    snapshots = api_get(f"/experiments/{exp['id']}/snapshots")
+    if snapshots:
+        snap_df = pd.DataFrame(snapshots)
+        snap_df["computed_at"] = pd.to_datetime(snap_df["computed_at"])
+        mean_pivot = snap_df.pivot_table(
+            index="computed_at", columns="variant_label", values="mean_value"
+        )
+        st.line_chart(mean_pivot)
+        st.caption("Mean metric value per variant across snapshot rounds")
+
+        p_value_pivot = snap_df[snap_df["p_value"].notna()].pivot_table(
+            index="computed_at", columns="variant_label", values="p_value"
+        )
+        if not p_value_pivot.empty:
+            st.line_chart(p_value_pivot)
+            st.caption("p-value vs baseline per variant (lower is more significant; dashed line at 0.05 not drawn but worth eyeballing)")
+    else:
+        st.caption("No snapshots yet — the metrics worker writes these as events arrive.")
+
     st.subheader("Winner status")
     if results["winner_variant_id"]:
         winner_label = df[df["variant_id"] == results["winner_variant_id"]]["label"].iloc[0] if not df.empty else "?"
-        st.success(f"Winner determined: **{winner_label}** — {results['winner_reason']}")
-        if col3.button("🏆 Promote Winner", disabled=exp["status"] == "completed"):
-            api_post(f"/experiments/{exp['id']}/promote", actor="dashboard-user")
-            st.rerun()
+        if results["status"] == "completed":
+            st.success(
+                f"**{winner_label}** was auto-promoted and is now the active version. "
+                f"{results['winner_reason']}"
+            )
+        else:
+            st.success(f"Winner determined: **{winner_label}** — {results['winner_reason']}")
+            st.caption("Auto-promotion is disabled (AUTO_PROMOTE_ENABLED=false); promote manually below.")
+            if col3.button("🏆 Promote Winner"):
+                api_post(f"/experiments/{exp['id']}/promote", actor="dashboard-user")
+                st.rerun()
     else:
         st.info(results["winner_reason"] or "No winner yet.")
 

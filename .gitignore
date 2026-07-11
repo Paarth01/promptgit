@@ -11,6 +11,12 @@ __pycache__/
 # Testing
 .pytest_cache/
 
+# Linting
+.ruff_cache/
+
+# Env files (commit .env.example only)
+.env
+
 # OS / Editor settings
 .DS_Store
 Thumbs.db

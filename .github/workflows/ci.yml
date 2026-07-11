@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff black
+      - run: ruff check api/ scripts/ tests/
+      - run: black --check api/ scripts/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+
+    # Real Postgres + Redis service containers, not mocks — this is what
+    # lets tests/test_integration.py run the actual FastAPI app end-to-end
+    # in CI, the same way it's meant to run locally.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: prompt_ab_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/prompt_ab_test
+      REDIS_URL: redis://localhost:6379/0
+      AUTH_DISABLED: "true"
+      HOLD_PERIOD_HOURS: "0.0003"  # ~1s, matches tests/test_integration.py's own override
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r api/requirements.txt
+          pip install pytest
+
+      - name: Apply migrations
+        run: |
+          for f in api/migrations/*.sql; do
+            echo "Applying $f"
+            PGPASSWORD=postgres psql -h localhost -U postgres -d prompt_ab_test -f "$f"
+          done
+
+      - name: Run full test suite (unit + integration)
+        run: python -m pytest tests/ -v

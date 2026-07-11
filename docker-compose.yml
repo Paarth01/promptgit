@@ -18,14 +18,39 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   api:
     build: ./api
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/prompt_ab
+      REDIS_URL: redis://redis:6379/0
+      # Set to "true" for local/demo convenience to skip API-key auth entirely.
+      # Leave unset (defaults to false) for anything resembling production.
+      AUTH_DISABLED: ${AUTH_DISABLED:-false}
+      # Required for the /events/judge llm_judge collector to actually call
+      # a model. Optional otherwise — task_accuracy collector doesn't need it.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AUTO_PROMOTE_ENABLED: ${AUTO_PROMOTE_ENABLED:-true}
+      # Short by default so `docker-compose up` alone produces a completed,
+      # auto-promoted demo experiment within a couple of minutes instead of
+      # 24 real hours. Override to 24 (or leave unset) for anything meant to
+      # resemble a real deployment's data-quality safety margin.
+      HOLD_PERIOD_HOURS: ${HOLD_PERIOD_HOURS:-0.02}
     ports:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./api/app:/app/app
@@ -35,8 +60,13 @@ services:
     command: ["python", "-m", "app.worker"]
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/prompt_ab
+      REDIS_URL: redis://redis:6379/0
+      AUTO_PROMOTE_ENABLED: ${AUTO_PROMOTE_ENABLED:-true}
+      HOLD_PERIOD_HOURS: ${HOLD_PERIOD_HOURS:-0.02}
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       api:
         condition: service_started
@@ -45,10 +75,34 @@ services:
     build: ./dashboard
     environment:
       API_BASE_URL: http://api:8000
+      API_KEY: ${DASHBOARD_API_KEY:-}
     ports:
       - "8501:8501"
     depends_on:
       - api
+
+  # Runs once: bootstraps an admin key and seeds the Phase 5 demo experiment
+  # through the real API, so the stack comes up with a running (and soon,
+  # auto-promoted/completed) experiment with zero manual steps. Exits after
+  # seeding; `docker-compose up` will show it as "exited (0)" once done,
+  # which is expected — it's a one-shot job, not a long-running service.
+  seed:
+    build: ./api
+    entrypoint: ["sh", "/app/scripts/docker_seed_entrypoint.sh"]
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgres:5432/prompt_ab
+    volumes:
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      metrics_worker:
+        condition: service_started
+    restart: "no"
 
 volumes:
   pgdata:

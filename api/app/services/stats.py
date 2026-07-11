@@ -12,6 +12,7 @@ whether the experiment has reached its pre-registered target_sample_size —
 significance and "enough data" are different questions and the dashboard
 should show both.
 """
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -25,9 +26,9 @@ class VariantSample:
     variant_id: str
     label: str
     is_baseline: bool
-    values: list[float]      # primary_metric_value for continuous metrics
-    successes: int = 0        # for binary metrics
-    n: int = 0                 # for binary metrics (== len(values) for continuous)
+    values: list[float]  # primary_metric_value for continuous metrics
+    successes: int = 0  # for binary metrics
+    n: int = 0  # for binary metrics (== len(values) for continuous)
     error_count: int = 0
     total_events: int = 0
 
@@ -102,9 +103,7 @@ def analyze_experiment(
 
         if baseline is not None and s.variant_id != baseline.variant_id:
             if metric_type == "binary":
-                p_value = _two_proportion_z_test(
-                    baseline.successes, baseline.n, s.successes, s.n
-                )
+                p_value = _two_proportion_z_test(baseline.successes, baseline.n, s.successes, s.n)
             else:
                 if use_nonparametric:
                     p_value = _mann_whitney(baseline.values, s.values)
@@ -113,25 +112,28 @@ def analyze_experiment(
 
             is_significant = p_value < ALPHA
             baseline_mean = (
-                (baseline.successes / baseline.n) if metric_type == "binary" and baseline.n
+                (baseline.successes / baseline.n)
+                if metric_type == "binary" and baseline.n
                 else (float(np.mean(baseline.values)) if baseline.values else None)
             )
-            if baseline_mean and mean_value is not None and baseline_mean != 0:
+            if baseline_mean is not None and mean_value is not None and baseline_mean != 0:
                 lift = (mean_value - baseline_mean) / abs(baseline_mean)
 
-        results.append(VariantResult(
-            variant_id=s.variant_id,
-            label=s.label,
-            is_baseline=s.is_baseline,
-            sample_size=s.n if metric_type == "binary" else len(s.values),
-            mean_value=mean_value,
-            std_dev=std_dev,
-            error_rate=error_rate,
-            p_value_vs_baseline=p_value,
-            is_significant=is_significant,
-            test_used=test_used if s.variant_id != (baseline.variant_id if baseline else None) else None,
-            relative_lift_vs_baseline=lift,
-        ))
+        results.append(
+            VariantResult(
+                variant_id=s.variant_id,
+                label=s.label,
+                is_baseline=s.is_baseline,
+                sample_size=s.n if metric_type == "binary" else len(s.values),
+                mean_value=mean_value,
+                std_dev=std_dev,
+                error_rate=error_rate,
+                p_value_vs_baseline=p_value,
+                is_significant=is_significant,
+                test_used=test_used if s.variant_id != (baseline.variant_id if baseline else None) else None,
+                relative_lift_vs_baseline=lift,
+            )
+        )
 
     return results
 
@@ -152,8 +154,28 @@ def minimum_detectable_effect(
     return float(mde)
 
 
-ERROR_RATE_GUARDRAIL = 0.15          # halt if any variant's error rate exceeds this
-UNDERPERFORM_GUARDRAIL_P = 0.01      # halt if variant is *significantly worse* at this p threshold
+def minimum_detectable_effect_continuous(
+    baseline_std_dev: float, n_per_variant: int, alpha: float = ALPHA, power: float = 0.8
+) -> float:
+    """Approximate MDE (in absolute units of the metric) for a continuous
+    metric, using the standard two-sample MDE formula assuming equal
+    variance and sample size across arms. This is deliberately the same
+    normal-approximation formula as the binary case, just parameterized by
+    std_dev instead of p(1-p) — good enough for 'is my sample size big
+    enough to matter' dashboard guidance, not a substitute for a proper
+    power analysis before launching a real experiment.
+    """
+    z_alpha = scipy_stats.norm.ppf(1 - alpha / 2)
+    z_power = scipy_stats.norm.ppf(power)
+    if n_per_variant <= 0 or baseline_std_dev <= 0:
+        return float("nan")
+    se = baseline_std_dev * np.sqrt(2 / n_per_variant)
+    mde = (z_alpha + z_power) * se
+    return float(mde)
+
+
+ERROR_RATE_GUARDRAIL = 0.15  # halt if any variant's error rate exceeds this
+UNDERPERFORM_GUARDRAIL_P = 0.01  # halt if variant is *significantly worse* at this p threshold
 
 
 def check_guardrails(results: list[VariantResult]) -> tuple[bool, str | None]:

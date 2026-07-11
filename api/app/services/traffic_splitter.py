@@ -9,12 +9,12 @@ splitter still behaves consistently even if you rebuild the assignments
 table, and it composes cleanly with the persisted-assignment check below for
 mid-experiment reproducibility even if traffic weights change.
 """
+
 import hashlib
 from uuid import UUID
 
-from sqlalchemy.orm import Session
-
 from app.db_models import ExperimentAssignment, ExperimentVariant
+from sqlalchemy.orm import Session
 
 
 def _hash_to_unit_interval(experiment_id: UUID, unit_id: str) -> float:
@@ -22,7 +22,7 @@ def _hash_to_unit_interval(experiment_id: UUID, unit_id: str) -> float:
     digest = hashlib.sha256(key).hexdigest()
     # Use first 13 hex chars (~52 bits) as an integer, normalize to [0, 1).
     as_int = int(digest[:13], 16)
-    max_val = 16 ** 13
+    max_val = 16**13
     return as_int / max_val
 
 
@@ -59,9 +59,7 @@ def assign_variant(
             chosen = v
             break
 
-    assignment = ExperimentAssignment(
-        experiment_id=experiment_id, unit_id=unit_id, variant_id=chosen.id
-    )
+    assignment = ExperimentAssignment(experiment_id=experiment_id, unit_id=unit_id, variant_id=chosen.id)
     db.add(assignment)
     db.commit()
     return chosen

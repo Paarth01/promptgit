@@ -1,17 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-
 from app import schemas
+from app.auth import require_admin, require_editor, require_viewer
 from app.database import get_db
-from app.db_models import Prompt, PromptAuditLog, PromptVersion
+from app.db_models import ApiKey, Prompt, PromptAuditLog, PromptVersion
 from app.services import versioning
 from app.services.serving import invalidate_cache
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/prompts", tags=["registry"])
 
 
 @router.post("", response_model=schemas.PromptOut, status_code=201)
-def create_prompt(body: schemas.PromptCreate, db: Session = Depends(get_db)):
+def create_prompt(
+    body: schemas.PromptCreate,
+    db: Session = Depends(get_db),
+    caller: ApiKey = Depends(require_editor),
+):
     existing = db.query(Prompt).filter(Prompt.slug == body.slug).first()
     if existing:
         raise HTTPException(409, f"prompt '{body.slug}' already exists")
@@ -19,12 +23,12 @@ def create_prompt(body: schemas.PromptCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[schemas.PromptOut])
-def list_prompts(db: Session = Depends(get_db)):
+def list_prompts(db: Session = Depends(get_db), caller: ApiKey = Depends(require_viewer)):
     return db.query(Prompt).order_by(Prompt.created_at.desc()).all()
 
 
 @router.get("/{slug}", response_model=schemas.PromptOut)
-def get_prompt(slug: str, db: Session = Depends(get_db)):
+def get_prompt(slug: str, db: Session = Depends(get_db), caller: ApiKey = Depends(require_viewer)):
     try:
         return versioning.get_prompt_by_slug(db, slug)
     except versioning.PromptNotFound as e:
@@ -32,10 +36,16 @@ def get_prompt(slug: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{slug}/versions", response_model=schemas.PromptVersionOut, status_code=201)
-def create_version(slug: str, body: schemas.PromptVersionCreate, db: Session = Depends(get_db)):
+def create_version(
+    slug: str,
+    body: schemas.PromptVersionCreate,
+    db: Session = Depends(get_db),
+    caller: ApiKey = Depends(require_editor),
+):
     try:
         version = versioning.create_version(
-            db, slug,
+            db,
+            slug,
             prompt_text=body.prompt_text,
             few_shot_examples=body.few_shot_examples,
             params=body.params,
@@ -53,7 +63,7 @@ def create_version(slug: str, body: schemas.PromptVersionCreate, db: Session = D
 
 
 @router.get("/{slug}/versions", response_model=list[schemas.PromptVersionOut])
-def list_versions(slug: str, db: Session = Depends(get_db)):
+def list_versions(slug: str, db: Session = Depends(get_db), caller: ApiKey = Depends(require_viewer)):
     try:
         prompt = versioning.get_prompt_by_slug(db, slug)
     except versioning.PromptNotFound as e:
@@ -67,7 +77,12 @@ def list_versions(slug: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{slug}/versions/{version_number}", response_model=schemas.PromptVersionOut)
-def get_version(slug: str, version_number: int, db: Session = Depends(get_db)):
+def get_version(
+    slug: str,
+    version_number: int,
+    db: Session = Depends(get_db),
+    caller: ApiKey = Depends(require_viewer),
+):
     try:
         return versioning.get_version_by_number(db, slug, version_number)
     except (versioning.PromptNotFound, versioning.VersionNotFound) as e:
@@ -75,7 +90,7 @@ def get_version(slug: str, version_number: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{slug}/active", response_model=schemas.PromptVersionOut)
-def get_active_version(slug: str, db: Session = Depends(get_db)):
+def get_active_version(slug: str, db: Session = Depends(get_db), caller: ApiKey = Depends(require_viewer)):
     try:
         prompt = versioning.get_prompt_by_slug(db, slug)
     except versioning.PromptNotFound as e:
@@ -86,7 +101,13 @@ def get_active_version(slug: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{slug}/diff", response_model=schemas.DiffResponse)
-def diff(slug: str, from_: int, to: int, db: Session = Depends(get_db)):
+def diff(
+    slug: str,
+    from_: int,
+    to: int,
+    db: Session = Depends(get_db),
+    caller: ApiKey = Depends(require_viewer),
+):
     try:
         return versioning.diff_versions(db, slug, from_, to)
     except (versioning.PromptNotFound, versioning.VersionNotFound) as e:
@@ -94,7 +115,12 @@ def diff(slug: str, from_: int, to: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{slug}/activate", response_model=schemas.PromptOut)
-def activate(slug: str, body: schemas.ActivateRequest, db: Session = Depends(get_db)):
+def activate(
+    slug: str,
+    body: schemas.ActivateRequest,
+    db: Session = Depends(get_db),
+    caller: ApiKey = Depends(require_admin),
+):
     try:
         prompt = versioning.activate_version(db, slug, body.version_id, body.actor, body.reason)
     except versioning.PromptNotFound as e:
@@ -106,7 +132,7 @@ def activate(slug: str, body: schemas.ActivateRequest, db: Session = Depends(get
 
 
 @router.get("/{slug}/audit-log", response_model=list[schemas.AuditLogEntry])
-def audit_log(slug: str, db: Session = Depends(get_db)):
+def audit_log(slug: str, db: Session = Depends(get_db), caller: ApiKey = Depends(require_viewer)):
     try:
         prompt = versioning.get_prompt_by_slug(db, slug)
     except versioning.PromptNotFound as e:
@@ -121,7 +147,11 @@ def audit_log(slug: str, db: Session = Depends(get_db)):
 
 @router.post("/{slug}/render", response_model=dict)
 def render_version(
-    slug: str, version_number: int, body: schemas.RenderRequest, db: Session = Depends(get_db)
+    slug: str,
+    version_number: int,
+    body: schemas.RenderRequest,
+    db: Session = Depends(get_db),
+    caller: ApiKey = Depends(require_viewer),
 ):
     """Sanity-check endpoint: render a specific version against sample context
     without going through experiment routing. Useful for the side-by-side

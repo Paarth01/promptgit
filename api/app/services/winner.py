@@ -7,6 +7,7 @@ Auto-promote requires ALL of:
      (protects against day-of-week / time-of-day confounds in early data)
   4. no guardrail has fired
 """
+
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -52,7 +53,16 @@ def determine_winner(
     if best.relative_lift_vs_baseline is not None and best.relative_lift_vs_baseline <= 0:
         return None, False, "baseline outperforms all challengers; no promotion"
 
-    return best.variant_id, True, (
-        f"'{best.label}' significant at p={best.p_value_vs_baseline:.4f}, "
-        f"lift={best.relative_lift_vs_baseline:+.1%}, sample size reached, hold period cleared"
+    lift_str = (
+        f"{best.relative_lift_vs_baseline:+.1%}"
+        if best.relative_lift_vs_baseline is not None
+        else "undefined (baseline rate is 0)"
+    )
+    return (
+        best.variant_id,
+        True,
+        (
+            f"'{best.label}' significant at p={best.p_value_vs_baseline:.4f}, "
+            f"lift={lift_str}, sample size reached, hold period cleared"
+        ),
     )

@@ -2,6 +2,7 @@
 (schema-drift validation, render logic) plus DB-backed tests that assume
 a Postgres instance is reachable via DATABASE_URL (skip gracefully if not).
 """
+
 import os
 import sys
 
@@ -44,6 +45,7 @@ def test_diff_text_output_shape():
     """diff_versions requires a DB; this test only checks the pure-function
     unified_diff formatting logic extracted inline for unit coverage."""
     import difflib
+
     a = "line one\nline two\n"
     b = "line one\nline three\n"
     diff = list(difflib.unified_diff(a.splitlines(keepends=True), b.splitlines(keepends=True)))
