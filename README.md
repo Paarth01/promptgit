@@ -19,22 +19,22 @@ significance, and rolled back with one click if it's worse.
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│  Dashboard  │─────▶│   FastAPI    │─────▶│  PostgreSQL │
+│  Dashboard  │────▶│   FastAPI    │─────▶│  PostgreSQL │
 │ (Streamlit) │      │     API      │      │             │
 └─────────────┘      └──────┬───────┘      └─────────────┘
-                             │  cache reads/writes,
-                             │  queue push on /events
-                             ▼
+                            │  cache reads/writes,
+                            │  queue push on /events
+                            ▼
                       ┌──────────────┐
-                      │    Redis     │◀────────────┐
-                      │ (cache+queue)│              │
-                      └──────┬───────┘              │
+                      │    Redis     │◀─────────────┐
+                      │ (cache+queue)│               │
+                      └──────┬───────┘               │
                              │ BLPOP                 │
                              ▼                       │
                       ┌──────────────┐               │
                       │   Metrics    │───────────────┘
                       │    Worker    │  writes snapshots,
-                      │ (queue-driven)│  auto-promotes winners
+                      │(queue-driven)│  auto-promotes winners
                       └──────────────┘
 ```
 
