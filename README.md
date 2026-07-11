@@ -17,11 +17,11 @@ significance, and rolled back with one click if it's worse.
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
-│  Dashboard  │─────▶│   FastAPI    │─────▶│  PostgreSQL │
+│  Dashboard  │────▶│   FastAPI     │────▶│  PostgreSQL │
 │ (Streamlit) │      │     API      │      │             │
 └─────────────┘      └──────────────┘      └─────────────┘
                              ▲                     ▲
-                             │                      │
+                             │                     │
                       ┌──────────────┐             │
                       │   Metrics    │─────────────┘
                       │    Worker    │
